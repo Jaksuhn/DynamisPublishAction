@@ -56,13 +56,9 @@ jobs:
       - name: Get Api level
         id: dalamud_version
         run: |
-          if [ "${{ inputs.dalamud_version }}" != "latest" ]; then
-            echo "version=${{ inputs.dalamud_version }}" >> $GITHUB_OUTPUT
-          else
-            curl -L https://raw.githubusercontent.com/goatcorp/Dalamud.NET.Sdk/refs/heads/master/Dalamud.NET.Sdk/Sdk/SdkPackageVersions.props -o sdk_versions.props
-            version=$(grep -o 'PackageVersion_Dalamud_NET_Sdk>[0-9]*\.[0-9]*\.[0-9]*' sdk_versions.props | cut -d'>' -f2 | cut -d'.' -f1)
-            echo "version=$version" >> $GITHUB_OUTPUT
-          fi
+          curl -L https://raw.githubusercontent.com/goatcorp/Dalamud.NET.Sdk/refs/heads/master/Dalamud.NET.Sdk/Sdk/SdkPackageVersions.props -o sdk_versions.props
+          version=$(grep -o 'PackageVersion_Dalamud_NET_Sdk>[0-9]*\.[0-9]*\.[0-9]*' sdk_versions.props | cut -d'>' -f2 | cut -d'.' -f1)
+          echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Download Dalamud Latest
         run: |
@@ -77,7 +73,7 @@ jobs:
         run: dotnet restore
 
       - name: Build Project
-        run: dotnet build --configuration Release ${{ inputs.project_path }} -p:AssemblyVersion=${{ env.tag }}
+        run: dotnet build --configuration Release ${{ inputs.output_path }} -p:AssemblyVersion=${{ env.tag }}
 
       - name: Publish Version
         uses: PunishXIV/dynamis-action@v1
