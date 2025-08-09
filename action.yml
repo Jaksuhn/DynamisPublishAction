@@ -13,11 +13,9 @@ on:
       internal_name:
         description: 'Internal name of the plugin. Defaults to the repository name'
         default: ${{ github.event.repository.name }}
-      path:
-        description: 'Path to the generated zip file. Defaults to `repository_name/bin/Release/repository_name.zip`'
+      output_path:
+        description: 'Path to the generated zip file. Defaults to `{repository_name}/bin/Release/{repository_name}/latest.zip`'
         default: ${{ github.event.repository.name }}/bin/Release/${{ github.event.repository.name }}/latest.zip
-      dalamud_version:
-        required: true
       publisher_key:
         default: $${{ secrets.PUBLISHER_KEY }}
 
@@ -55,6 +53,17 @@ jobs:
           track_name=$(echo "$latest_entry" | yq eval '.key' -)
           echo "result=$track_name" >> $GITHUB_OUTPUT
 
+      - name: Get Api level
+        id: dalamud_version
+        run: |
+          if [ "${{ inputs.dalamud_version }}" != "latest" ]; then
+            echo "version=${{ inputs.dalamud_version }}" >> $GITHUB_OUTPUT
+          else
+            curl -L https://raw.githubusercontent.com/goatcorp/Dalamud.NET.Sdk/refs/heads/master/Dalamud.NET.Sdk/Sdk/SdkPackageVersions.props -o sdk_versions.props
+            version=$(grep -o 'PackageVersion_Dalamud_NET_Sdk>[0-9]*\.[0-9]*\.[0-9]*' sdk_versions.props | cut -d'>' -f2 | cut -d'.' -f1)
+            echo "version=$version" >> $GITHUB_OUTPUT
+          fi
+
       - name: Download Dalamud Latest
         run: |
           if [ "${{ steps.latest_track.outputs.result }}" == "release" ]; then
@@ -68,7 +77,7 @@ jobs:
         run: dotnet restore
 
       - name: Build Project
-        run: dotnet build --configuration Release Automaton/Automaton.csproj -p:AssemblyVersion=${{ env.tag }}
+        run: dotnet build --configuration Release ${{ inputs.project_path }} -p:AssemblyVersion=${{ env.tag }}
 
       - name: Publish Version
         uses: PunishXIV/dynamis-action@v1
@@ -77,8 +86,8 @@ jobs:
           plugin_id: ${{ inputs.plugin_id }}
           internal_name: ${{ inputs.internal_name }}
           version_number: ${{ env.tag }}
-          path: ${{ inputs.path }}
+          path: ${{ inputs.output_path }}
           type: 'latest'
-          dalamud_version: '13'
+          dalamud_version: ${{ steps.dalamud_version.outputs.version }}
         env:
           PUBLISHER_KEY: ${{ inputs.publisher_key }}
