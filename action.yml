@@ -18,6 +18,8 @@ on:
         default: ${{ github.event.repository.name }}/bin/Release/${{ github.event.repository.name }}/latest.zip
       dalamud_version:
         required: true
+      publisher_key:
+        default: $${{ secrets.PUBLISHER_KEY }}
 
 on:
   push:
@@ -84,4 +86,4 @@ jobs:
           type: 'latest'
           dalamud_version: '13'
         env:
-          PUBLISHER_KEY: ${{ secrets.PUBLISHER_KEY }}
+          PUBLISHER_KEY: ${{ inputs.publisher_key }}
