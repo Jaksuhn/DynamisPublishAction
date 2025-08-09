@@ -21,11 +21,6 @@ on:
       publisher_key:
         default: $${{ secrets.PUBLISHER_KEY }}
 
-on:
-  push:
-    tags:
-      - ${{ inputs.version_format }}
-
 jobs:
   Build:
     runs-on: ubuntu-latest
