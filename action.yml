@@ -4,20 +4,21 @@ description: 'Builds plugin against the latest Dalamud branch, or release if ava
 on:
   workflow_call:
     inputs:
-      version_format:
-        description: "Format of the plugin's version number. Default `v*.*`"
-        default: 'v*.*'
       plugin_id:
         description: 'Plugin id on Dynamis'
         required: true
+      version:
+        description: 'Version number for the plugin. Pass `github.ref_name`'
+        required: true
       internal_name:
-        description: 'Internal name of the plugin. Defaults to the repository name'
-        default: ${{ github.event.repository.name }}
+        description: 'Internal name of the plugin. Pass `github.event.repository.name` or override'
+        required: true
       output_path:
-        description: 'Path to the generated zip file. Defaults to `{repository_name}/bin/Release/{repository_name}/latest.zip`'
-        default: ${{ github.event.repository.name }}/bin/Release/${{ github.event.repository.name }}/latest.zip
+        description: 'Path to the generated zip file.
+        required: true
       publisher_key:
-        default: $${{ secrets.PUBLISHER_KEY }}
+        description: 'Publisher key for Dynamis. Can be passed as secret instead.'
+        required: true
 
 jobs:
   Build:
@@ -29,9 +30,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-
-      - name: Get Tag Name
-        run: echo "tag=$(echo ${{ github.ref }} | sed 's/refs\/tags\/v//')" >> $GITHUB_ENV
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v3
@@ -74,7 +72,7 @@ jobs:
         run: dotnet restore
 
       - name: Build Project
-        run: dotnet build --configuration Release ${{ inputs.output_path }} -p:AssemblyVersion=${{ env.tag }}
+        run: dotnet build --configuration Release ${{ inputs.output_path }} -p:AssemblyVersion=${{ inputs.version }}
 
       - name: Publish Version
         uses: PunishXIV/dynamis-action@v1
@@ -82,7 +80,7 @@ jobs:
         with:
           plugin_id: ${{ inputs.plugin_id }}
           internal_name: ${{ inputs.internal_name }}
-          version_number: ${{ env.tag }}
+          version_number: ${{ inputs.version }}
           path: ${{ inputs.output_path }}
           type: 'latest'
           dalamud_version: ${{ steps.dalamud_version.outputs.version }}
