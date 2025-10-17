@@ -14,7 +14,7 @@ on:
         description: 'Internal name of the plugin. Pass `github.event.repository.name` or override'
         required: true
       output_path:
-        description: 'Path to the generated zip file.
+        description: 'Path to the generated zip file.'
         required: true
       publisher_key:
         description: 'Publisher key for Dynamis. Can be passed as secret instead.'
