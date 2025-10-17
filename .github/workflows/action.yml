@@ -7,18 +7,23 @@ on:
       plugin_id:
         description: 'Plugin id on Dynamis'
         required: true
+        type: number
       version:
         description: 'Version number for the plugin. Pass `github.ref_name`'
         required: true
+        type: string
       internal_name:
         description: 'Internal name of the plugin. Pass `github.event.repository.name` or override'
         required: true
+        type: string
       output_path:
         description: 'Path to the generated zip file.'
         required: true
+        type: string
       publisher_key:
         description: 'Publisher key for Dynamis. Can be passed as secret instead.'
         required: true
+        type: string
 
 jobs:
   Build:
