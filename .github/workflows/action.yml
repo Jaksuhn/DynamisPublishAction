@@ -1,30 +1,31 @@
-name: 'Build & Publish to Dynamis'
-description: 'Builds plugin against the latest Dalamud branch, or release if available, then publishes to Dynamis'
-
+---
+name: Build & Publish to Dynamis
+description: Builds plugin against the latest Dalamud branch, or release if
+  available, then publishes to Dynamis
 on:
   workflow_call:
     inputs:
       plugin_id:
-        description: 'Plugin id on Dynamis'
+        description: Plugin id on Dynamis
         required: true
         type: number
       version:
-        description: 'Version number for the plugin. Pass `github.ref_name`'
+        description: Version number for the plugin. Pass `github.ref_name`
         required: true
         type: string
       internal_name:
-        description: 'Internal name of the plugin. Pass `github.event.repository.name` or override'
+        description: Internal name of the plugin. Pass `github.event.repository.name` or
+          override
         required: true
         type: string
       output_path:
-        description: 'Path to the generated zip file.'
+        description: Path to the generated zip file.
         required: true
         type: string
       publisher_key:
-        description: 'Publisher key for Dynamis'
+        description: Publisher key for Dynamis
         required: true
         type: string
-
 jobs:
   Build:
     runs-on: ubuntu-latest
@@ -35,50 +36,57 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-
       - name: Set up .NET
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
-
       - name: Download config.yaml
-        run: curl -L https://raw.githubusercontent.com/goatcorp/dalamud-declarative/main/config.yaml -o config.yaml
-
+        run: curl -L
+          https://raw.githubusercontent.com/goatcorp/dalamud-declarative/main/config.yaml
+          -o config.yaml
       - name: Install yq
-        run: |
-          wget https://github.com/mikefarah/yq/releases/download/v4.34.1/yq_linux_amd64 -O /usr/local/bin/yq
-          chmod +x /usr/local/bin/yq
+        run: >
+          wget
+          https://github.com/mikefarah/yq/releases/download/v4.34.1/yq_linux_amd64
+          -O /usr/local/bin/yq
 
+          chmod +x /usr/local/bin/yq
       - name: Extract Latest Track Name
         id: latest_track
-        run: |
-          # Get the latest track, sorted by applicableGameVersion, ignore any ties that have an alias field (they might be behind in cs commits), and prioritise release in a tie.
-          latest_entry=$(yq eval '.tracks | to_entries | map(select(.value.alias == null)) | sort_by(.value.applicableGameVersion, (.key == "release")) | .[-1]' config.yaml)
-          track_name=$(echo "$latest_entry" | yq eval '.key' -)
-          echo "result=$track_name" >> $GITHUB_OUTPUT
+        run: >
+          # Get the latest track, sorted by applicableGameVersion, ignore any ties
+          that have an alias field (they might be behind in cs commits), and
+          prioritise release in a tie.
 
+          latest_entry=$(yq eval '.tracks | to_entries | map(select(.value.alias == null)) | sort_by(.value.applicableGameVersion, (.key == "release")) | .[-1]' config.yaml)
+
+          track_name=$(echo "$latest_entry" | yq eval '.key' -)
+
+          echo "result=$track_name" >> $GITHUB_OUTPUT
       - name: Get Api level
         id: dalamud_version
-        run: |
-          curl -L https://raw.githubusercontent.com/goatcorp/Dalamud.NET.Sdk/refs/heads/master/Dalamud.NET.Sdk/Sdk/SdkPackageVersions.props -o sdk_versions.props
-          version=$(grep -o 'PackageVersion_Dalamud_NET_Sdk>[0-9]*\.[0-9]*\.[0-9]*' sdk_versions.props | cut -d'>' -f2 | cut -d'.' -f1)
-          echo "version=$version" >> $GITHUB_OUTPUT
+        run: >
+          curl -L
+          https://raw.githubusercontent.com/goatcorp/Dalamud.NET.Sdk/refs/heads/master/Dalamud.NET.Sdk/Sdk/SdkPackageVersions.props
+          -o sdk_versions.props
 
+          version=$(grep -o 'PackageVersion_Dalamud_NET_Sdk>[0-9]*\.[0-9]*\.[0-9]*' sdk_versions.props | cut -d'>' -f2 | cut -d'.' -f1)
+
+          echo "version=$version" >> $GITHUB_OUTPUT
       - name: Download Dalamud Latest
-        run: |
+        run: >
           if [ "${{ steps.latest_track.outputs.result }}" == "release" ]; then
               wget https://goatcorp.github.io/dalamud-distrib/latest.zip -O ${{ env.DALAMUD_HOME }}.zip
           else
               wget https://goatcorp.github.io/dalamud-distrib/${{ steps.latest_track.outputs.result }}/latest.zip -O ${{ env.DALAMUD_HOME }}.zip
           fi
-          unzip ${{ env.DALAMUD_HOME }}.zip -d ${{ env.DALAMUD_HOME }}
 
+          unzip ${{ env.DALAMUD_HOME }}.zip -d ${{ env.DALAMUD_HOME }}
       - name: Restore Project
         run: dotnet restore
-
       - name: Build Project
-        run: dotnet build --configuration Release ${{ inputs.output_path }} -p:AssemblyVersion=${{ inputs.version }}
-
+        run: dotnet build --configuration Release ${{ inputs.output_path }}
+          -p:AssemblyVersion=${{ inputs.version }}
       - name: Publish Version
         uses: PunishXIV/dynamis-action@v1
         id: dynamis
@@ -87,7 +95,7 @@ jobs:
           internal_name: ${{ inputs.internal_name }}
           version_number: ${{ inputs.version }}
           path: ${{ inputs.output_path }}
-          type: 'latest'
+          type: latest
           dalamud_version: ${{ steps.dalamud_version.outputs.version }}
         env:
           PUBLISHER_KEY: ${{ inputs.publisher_key }}
