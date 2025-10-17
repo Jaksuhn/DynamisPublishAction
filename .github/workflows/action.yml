@@ -21,7 +21,7 @@ on:
         required: true
         type: string
       publisher_key:
-        description: 'Publisher key for Dynamis. Can be passed as secret instead.'
+        description: 'Publisher key for Dynamis'
         required: true
         type: string
 
