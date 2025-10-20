@@ -1,0 +1,273 @@
+name: Dalamud Plugin Builder and Publisher
+description: Builds plugin against auto detected latest dalamud version and publishes it to PunishXIV/Dynamis
+inputs:
+  plugin_id:
+    description: "Dynamis plugin id"
+    required: true
+  project_csproj:
+    description: "Optional path to .csproj; auto-detected if omitted"
+    required: false
+  output_path:
+    description: "Optional path to latest.zip; auto-detected if omitted"
+    required: false
+  internal_name:
+    description: "Optional InternalName; auto-detected from JSON or csproj name if omitted"
+    required: false
+  dotnet_version:
+    description: ".NET version to use"
+    required: false
+    default: "9.0.x"
+  dalamud_api_level:
+    description: "Dalamud API level for fallback if auto detection fails"
+    required: false
+    default: "13"
+  publisher_key:
+    description: "Publisher key (pass from caller, e.g. via publisher_key: <secret>)"
+    required: true
+runs:
+  using: "composite"
+  env:
+    DALAMUD_API_FALLBACK: ${{ inputs.dalamud_api_level }}
+  steps:
+    - name: Checkout repository (with submodules)
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        submodules: recursive
+        persist-credentials: true
+
+    - name: Determine tag/version
+      shell: bash
+      run: |
+        tag="$(echo "${GITHUB_REF:-}" | sed 's#refs/tags/v##; s#refs/tags/##')"
+        echo "Derived tag: $tag"
+        echo "tag=$tag" >> $GITHUB_ENV
+
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ inputs.dotnet_version }}
+
+    - name: Download config.yaml
+      shell: bash
+      run: curl -L https://raw.githubusercontent.com/goatcorp/dalamud-declarative/main/config.yaml -o config.yaml
+
+    - name: Install yq
+      shell: bash
+      run: |
+        wget https://github.com/mikefarah/yq/releases/download/v4.34.1/yq_linux_amd64 -O /usr/local/bin/yq
+        chmod +x /usr/local/bin/yq
+
+    - name: Extract Latest Track Name
+      id: latest_track
+      shell: bash
+      run: |
+        latest_entry=$(yq eval '.tracks | to_entries | sort_by(.value.applicableGameVersion, (.key == "release")) | .[-1]' config.yaml)
+        track_name=$(echo "$latest_entry" | yq eval '.key' -)
+        echo "result=$track_name" >> $GITHUB_OUTPUT
+
+    - name: Download Dalamud Latest
+      shell: bash
+      run: |
+        DALAMUD_HOME=/tmp/dalamud
+        if [ "${{ steps.latest_track.outputs.result }}" = "release" ]; then
+            wget https://goatcorp.github.io/dalamud-distrib/latest.zip -O $DALAMUD_HOME.zip
+        else
+            wget https://goatcorp.github.io/dalamud-distrib/${{ steps.latest_track.outputs.result }}/latest.zip -O $DALAMUD_HOME.zip
+        fi
+        unzip -q $DALAMUD_HOME.zip -d $DALAMUD_HOME
+
+    - name: Set DALAMUD_HOME environment variable
+      shell: bash
+      run: |
+        if [ -d "/tmp/dalamud" ]; then
+          echo "DALAMUD_HOME=/tmp/dalamud" >> $GITHUB_ENV
+          echo "Set DALAMUD_HOME=/tmp/dalamud"
+        else
+          echo "Expected /tmp/dalamud to exist but it does not. Listing /tmp:"
+          ls -la /tmp || true
+          exit 1
+        fi
+
+    - name: Get Api level
+      id: dalamud_version
+      shell: bash
+      run: |
+        curl -L https://raw.githubusercontent.com/goatcorp/Dalamud.NET.Sdk/refs/heads/master/Dalamud.NET.Sdk/Sdk/SdkPackageVersions.props -o sdk_versions.props || true
+        version=$(grep -o 'PackageVersion_Dalamud_NET_Sdk>[0-9]*\.[0-9]*\.[0-9]*' sdk_versions.props | cut -d'>' -f2 | cut -d'.' -f1 || true)
+        version=${version:-DALAMUD_API_FALLBACK}
+        echo "dalamud_version=$version" >> $GITHUB_OUTPUT
+
+    - name: Detect .csproj (if not provided)
+      id: detect_csproj
+      shell: bash
+      run: |
+        # Build exclude args for find based on .gitmodules to avoid searching submodules when auto-detecting
+        EXCLUDE_FIND_ARGS=()
+        if [ -f .gitmodules ]; then
+          while IFS= read -r path; do
+            EXCLUDE_FIND_ARGS+=( -path "./$path" -prune -o )
+          done < <(git config -f .gitmodules --get-regexp path | awk '{print $2}')
+        fi
+
+        if [ -n "${{ inputs.project_csproj }}" ]; then
+          echo "Using provided csproj: ${{ inputs.project_csproj }}"
+          echo "csproj=${{ inputs.project_csproj }}" >> $GITHUB_ENV
+        else
+          # Use array expansion so excluded submodule paths are honored
+          csproj=$(find . "${EXCLUDE_FIND_ARGS[@]}" -name "*.csproj" -print -quit || true)
+          if [ -z "$csproj" ]; then
+            echo "No .csproj found and no project_csproj input provided" >&2
+            exit 1
+          fi
+          echo "Auto-detected csproj: $csproj"
+          echo "csproj=$csproj" >> $GITHUB_ENV
+        fi
+
+    - name: Detect InternalName (if not provided)
+      id: detect_internal
+      shell: bash
+      run: |
+        # Gather submodule paths to exclude them from search
+        SUBMODULE_PATHS=()
+        if [ -f .gitmodules ]; then
+          while IFS= read -r path; do
+            SUBMODULE_PATHS+=( "$path" )
+          done < <(git config -f .gitmodules --get-regexp path | awk '{print $2}')
+        fi
+
+        if [ -n "${{ inputs.internal_name }}" ]; then
+          echo "Using provided internal_name: ${{ inputs.internal_name }}"
+          echo "internal_name=${{ inputs.internal_name }}" >> $GITHUB_ENV
+        else
+          # ensure jq is available for robust JSON parsing
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+          found=""
+          found_file=""
+
+          # build find exclude args if there are submodules
+          EXCLUDE_ARGS=()
+          for p in "${SUBMODULE_PATHS[@]}"; do
+            EXCLUDE_ARGS+=( -path "./$p" -prune -o )
+          done
+
+          # list JSON files excluding submodule paths
+          if [ ${#EXCLUDE_ARGS[@]} -gt 0 ]; then
+            # shellcheck disable=SC2086
+            files=$(eval find . ${EXCLUDE_ARGS[@]} -name "*.json" -print || true)
+          else
+            files=$(find . -name "*.json" -print || true)
+          fi
+
+          for f in $files; do
+            raw=$(jq -c '
+              (.. | objects | .InternalName?) as $n
+              | if $n == null then empty
+                elif ($n | type) == "string" then {type:"string", value:$n}
+                elif ($n | type) == "object" then
+                  ($n | to_entries | .[] | select(.value|type=="string") | {type:"object", value:.value})
+                elif ($n | type) == "array" then
+                  ($n[] | select(type=="string") | {type:"array", value:.})
+                else empty end
+            ' "$f" 2>/dev/null | head -n1 || true)
+
+            if [ -n "$raw" ]; then
+              val=$(echo "$raw" | jq -r '.value' 2>/dev/null || true)
+              if [ -n "$val" ]; then
+                found="$val"
+                found_file="$f"
+                echo "DEBUG: jq raw match from $f -> $raw"
+                break
+              fi
+            fi
+          done
+
+          if [ -n "$found" ]; then
+            echo "Auto-detected InternalName from $found_file: $found"
+            echo "internal_name=$found" >> $GITHUB_ENV
+          else
+            projname=$(basename "${csproj:-}" .csproj)
+            echo "Falling back to csproj name for InternalName: $projname"
+            echo "internal_name=$projname" >> $GITHUB_ENV
+          fi
+        fi
+
+    - name: Restore (solution or csproj)
+      id: restore
+      shell: bash
+      run: |
+        # If there's a solution file, restore the solution so cross-project references succeed.
+        sln=$(find . -maxdepth 3 -name "*.sln" -print -quit || true)
+        if [ -n "$sln" ]; then
+          echo "Found solution file: $sln"
+          dotnet restore "$sln"
+          echo "restore_target=$sln" >> $GITHUB_OUTPUT
+        else
+          echo "No solution file found; restoring csproj: ${csproj}"
+          dotnet restore "${csproj}"
+          echo "restore_target=${csproj}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build (solution or csproj)
+      id: build
+      shell: bash
+      run: |
+        if [ -n "${{ steps.restore.outputs.restore_target }}" ]; then
+          target="${{ steps.restore.outputs.restore_target }}"
+        else
+          target="${csproj}"
+        fi
+        echo "Building target: $target"
+        dotnet build --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }}
+
+    - name: Locate or create output latest.zip
+      id: locate_output
+      shell: bash
+      run: |
+        # Prefer an existing latest.zip anywhere under bin/*/Release/*/latest.zip
+        out=$(find . -type f -path "*/bin/*/Release/*/latest.zip" -print -quit || true)
+        if [ -n "$out" ]; then
+          echo "Found existing latest.zip: $out"
+          echo "output_path=$out" >> $GITHUB_ENV
+          exit 0
+        fi
+
+        # Find a release directory under bin/*/Release/*
+        # Prefer directories that match platform/framework variants (e.g. bin/x64/Release)
+        release_dir=$(find . -type d -path "*/bin/*/Release/*" -print -quit || true)
+
+        # Fallback: accept bin/*/Release (some builds might not create an extra subdir)
+        if [ -z "$release_dir" ]; then
+          release_dir=$(find . -type d -path "*/bin/*/Release" -print -quit || true)
+        fi
+
+        if [ -n "$release_dir" ]; then
+          if ! command -v zip >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y zip
+          fi
+          zipfile="$release_dir/latest.zip"
+          (cd "$release_dir" && zip -r -q latest.zip .)
+          echo "Created latest.zip at: $zipfile"
+          echo "output_path=$zipfile" >> $GITHUB_ENV
+          exit 0
+        fi
+
+        echo "Could not determine or create an output latest.zip; provide output_path input." >&2
+        exit 1
+
+    - name: Publish Version
+      uses: PunishXIV/dynamis-action@v1
+      with:
+        plugin_id: ${{ inputs.plugin_id }}
+        internal_name: ${{ env.internal_name }}
+        version_number: ${{ env.tag }}
+        path: ${{ env.output_path }}
+        type: "latest"
+        dalamud_version: ${{ steps.dalamud_version.outputs.dalamud_version }}
+      env:
+        PUBLISHER_KEY: ${{ inputs.publisher_key }}
