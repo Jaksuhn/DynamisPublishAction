@@ -24,8 +24,6 @@ inputs:
   publisher_key:
     description: "Publisher key (pass from caller, e.g. via publisher_key: <secret>)"
     required: true
-env:
-  DALAMUD_API_FALLBACK: ${{ inputs.dalamud_api_level }}
 runs:
   using: "composite"
   steps:
@@ -95,7 +93,7 @@ runs:
       run: |
         curl -L https://raw.githubusercontent.com/goatcorp/Dalamud.NET.Sdk/refs/heads/master/Dalamud.NET.Sdk/Sdk/SdkPackageVersions.props -o sdk_versions.props || true
         version=$(grep -o 'PackageVersion_Dalamud_NET_Sdk>[0-9]*\.[0-9]*\.[0-9]*' sdk_versions.props | cut -d'>' -f2 | cut -d'.' -f1 || true)
-        version=${version:-DALAMUD_API_FALLBACK}
+        version=${version:-${{ inputs.dalamud_api_level }}}
         echo "dalamud_version=$version" >> $GITHUB_OUTPUT
 
     - name: Detect .csproj (if not provided)
