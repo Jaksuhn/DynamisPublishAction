@@ -7,9 +7,6 @@ inputs:
   project_csproj:
     description: "Optional path to .csproj; auto-detected if omitted"
     required: false
-  output_path:
-    description: "Optional path to latest.zip; auto-detected if omitted"
-    required: false
   internal_name:
     description: "Optional InternalName; auto-detected from JSON or csproj name if omitted"
     required: false
@@ -214,49 +211,27 @@ runs:
       id: build
       shell: bash
       run: |
+        set -euo pipefail
         if [ -n "${{ steps.restore.outputs.restore_target }}" ]; then
           target="${{ steps.restore.outputs.restore_target }}"
         else
           target="${csproj}"
         fi
         echo "Building target: $target"
-        dotnet build --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }}
+        
+        artifact_dir="$(pwd)/.dynamis_artifact"
+        rm -rf "$artifact_dir"
+        mkdir -p "$artifact_dir"
 
-    - name: Locate or create output latest.zip
-      id: locate_output
-      shell: bash
-      run: |
-        # Prefer an existing latest.zip anywhere under bin/*/Release/*/latest.zip
-        out=$(find . -type f -path "*/bin/*/Release/*/latest.zip" -print -quit || true)
-        if [ -n "$out" ]; then
-          echo "Found existing latest.zip: $out"
-          echo "output_path=$out" >> $GITHUB_ENV
-          exit 0
+        dotnet build --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }} -o "$artifact_dir"
+        if ! command -v zip >/dev/null 2>&1; then
+          sudo apt-get update -y
+          sudo apt-get install -y zip
         fi
-
-        # Find a release directory under bin/*/Release/*
-        # Prefer directories that match platform/framework variants (e.g. bin/x64/Release)
-        release_dir=$(find . -type d -path "*/bin/*/Release/*" -print -quit || true)
-
-        # Fallback: accept bin/*/Release (some builds might not create an extra subdir)
-        if [ -z "$release_dir" ]; then
-          release_dir=$(find . -type d -path "*/bin/*/Release" -print -quit || true)
-        fi
-
-        if [ -n "$release_dir" ]; then
-          if ! command -v zip >/dev/null 2>&1; then
-            sudo apt-get update -y
-            sudo apt-get install -y zip
-          fi
-          zipfile="$release_dir/latest.zip"
-          (cd "$release_dir" && zip -r -q latest.zip .)
-          echo "Created latest.zip at: $zipfile"
-          echo "output_path=$zipfile" >> $GITHUB_ENV
-          exit 0
-        fi
-
-        echo "Could not determine or create an output latest.zip; provide output_path input." >&2
-        exit 1
+        zipfile="$artifact_dir/latest.zip"
+        (cd "$artifact_dir" && zip -r -q latest.zip .)
+        echo "Created latest.zip at: $zipfile"
+        echo "output_path=$zipfile" >> $GITHUB_ENV
 
     - name: Publish Version
       uses: PunishXIV/dynamis-action@v1
