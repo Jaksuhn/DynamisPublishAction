@@ -24,10 +24,10 @@ inputs:
   publisher_key:
     description: "Publisher key (pass from caller, e.g. via publisher_key: <secret>)"
     required: true
+env:
+  DALAMUD_API_FALLBACK: ${{ inputs.dalamud_api_level }}
 runs:
   using: "composite"
-  env:
-    DALAMUD_API_FALLBACK: ${{ inputs.dalamud_api_level }}
   steps:
     - name: Checkout repository (with submodules)
       uses: actions/checkout@v4
