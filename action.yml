@@ -219,21 +219,18 @@ runs:
         fi
         echo "Building target: $target"
 
-        dotnet build --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }}
+        artifact_dir="$(pwd)/.dynamis_artifact"
+        rm -rf "$artifact_dir" && mkdir -p "$artifact_dir"
 
-        proj_csproj="${csproj}"
-        projdir=$(dirname "$proj_csproj")
-        projname=$(basename "$proj_csproj" .csproj)
-        zipfile="$projdir/bin/Release/$projname/latest.zip"
-        if [ ! -f "$zipfile" ]; then
-          echo "Expected SDK-produced zip not found at $zipfile" >&2
-          echo "Directory listing for debug:" >&2
-          ls -la "$projdir/bin/Release" || true
-          find "$projdir/bin/Release" -maxdepth 3 -type f -name "*.zip" -print || true
-          exit 1
+        dotnet publish --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }} -p:PublishDir="$artifact_dir/"
+
+        if ! command -v zip >/dev/null 2>&1; then
+          sudo apt-get update -y
+          sudo apt-get install -y zip
         fi
-        echo "Detected build artifact: $zipfile"
-        echo "output_path=$zipfile" >> $GITHUB_ENV
+        (cd "$artifact_dir" && zip -r -q latest.zip .)
+        echo "Created latest.zip at: $artifact_dir/latest.zip"
+        echo "output_path=$artifact_dir/latest.zip" >> $GITHUB_ENV
 
     - name: Publish Version
       uses: PunishXIV/dynamis-action@v1
