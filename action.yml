@@ -218,12 +218,12 @@ runs:
           target="${csproj}"
         fi
         echo "Building target: $target"
-        
+
         artifact_dir="$(pwd)/.dynamis_artifact"
         rm -rf "$artifact_dir"
         mkdir -p "$artifact_dir"
 
-        dotnet build --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }} -o "$artifact_dir"
+        dotnet build --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }} --property:PublishDir="$artifact_dir"
         if ! command -v zip >/dev/null 2>&1; then
           sudo apt-get update -y
           sudo apt-get install -y zip
