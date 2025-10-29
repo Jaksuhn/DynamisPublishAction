@@ -217,24 +217,22 @@ runs:
         else
           restore_target="${csproj}"
         fi
-        # Always build the actual project to trigger SDK packaging
         build_target="${csproj}"
         echo "Restored: $restore_target"
         echo "Building project for packaging: $build_target"
 
-        # Build in Release; Dalamud SDK should emit a latest.zip in bin/*Release*
         dotnet build --configuration Release "$build_target" -p:AssemblyVersion=${{ env.tag }}
 
         proj_csproj="${csproj}"
         projdir=$(dirname "$proj_csproj")
 
-        echo "PWD: $(pwd)"
-        echo "Top-level workspace listing:" && ls -la || true
-        echo "Recursive listing of project directory ($projdir):" && ls -laR "$projdir" || true
-        echo "Search for any latest.zip under workspace:" && find . -type f -name "latest.zip" -print || true
-
-        # Search the entire workspace for the most recent latest.zip
-        zipfile=$(find . -type f -name "latest.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}')
+        # Attempt to find latest.zip in the standard path
+        projname=$(basename "$proj_csproj" .csproj)
+        zipfile="$projdir/bin/Release/$projname/latest.zip"
+        if [ ! -f "$zipfile" ]; then
+          # Fallback: pick the newest latest.zip anywhere in the workspace
+          zipfile=$(find . -type f -name "latest.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}')
+        fi
         if [ -z "${zipfile:-}" ]; then
           echo "Expected SDK-produced latest.zip not found under $projdir/bin" >&2
           echo "Available Release tree for debug:" >&2
