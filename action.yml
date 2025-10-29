@@ -219,19 +219,18 @@ runs:
         fi
         echo "Building target: $target"
 
-        dotnet publish --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }}
+        artifact_dir="$(pwd)/.dynamis_artifact"
+        rm -rf "$artifact_dir" && mkdir -p "$artifact_dir"
 
-        projdir=$(dirname "$target")
-        zipfile=$(find "$projdir/bin/Release" -type f -name "*.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}')
-        if [ -z "${zipfile:-}" ]; then
-          zipfile=$(find . -path "*/bin/Release*" -type f -name "*.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}')
+        dotnet publish --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }} -p:PublishDir="$artifact_dir/"
+
+        if ! command -v zip >/dev/null 2>&1; then
+          sudo apt-get update -y
+          sudo apt-get install -y zip
         fi
-        if [ -z "${zipfile:-}" ]; then
-          echo "Failed to find a produced zip after publish." >&2
-          exit 1
-        fi
-        echo "Detected publish artifact: $zipfile"
-        echo "output_path=$zipfile" >> $GITHUB_ENV
+        (cd "$artifact_dir" && zip -r -q latest.zip .)
+        echo "Created latest.zip at: $artifact_dir/latest.zip"
+        echo "output_path=$artifact_dir/latest.zip" >> $GITHUB_ENV
 
     - name: Publish Version
       uses: PunishXIV/dynamis-action@v1
