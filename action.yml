@@ -219,18 +219,18 @@ runs:
         fi
         echo "Building target: $target"
 
-        artifact_dir="$(pwd)/.dynamis_artifact"
-        rm -rf "$artifact_dir"
-        mkdir -p "$artifact_dir"
+        dotnet publish --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }}
 
-        dotnet build --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }} --property:PublishDir="$artifact_dir"
-        if ! command -v zip >/dev/null 2>&1; then
-          sudo apt-get update -y
-          sudo apt-get install -y zip
+        projdir=$(dirname "$target")
+        zipfile=$(find "$projdir/bin/Release" -type f -name "*.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}')
+        if [ -z "${zipfile:-}" ]; then
+          zipfile=$(find . -path "*/bin/Release*" -type f -name "*.zip" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | awk '{print $2}')
         fi
-        zipfile="$artifact_dir/latest.zip"
-        (cd "$artifact_dir" && zip -r -q latest.zip .)
-        echo "Created latest.zip at: $zipfile"
+        if [ -z "${zipfile:-}" ]; then
+          echo "Failed to find a produced zip after publish." >&2
+          exit 1
+        fi
+        echo "Detected publish artifact: $zipfile"
         echo "output_path=$zipfile" >> $GITHUB_ENV
 
     - name: Publish Version
