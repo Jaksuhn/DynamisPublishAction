@@ -219,18 +219,32 @@ runs:
         fi
         echo "Building target: $target"
 
-        artifact_dir="$(pwd)/.dynamis_artifact"
-        rm -rf "$artifact_dir" && mkdir -p "$artifact_dir"
+        # Build in Release; Dalamud SDK should emit a latest.zip in bin/*Release*
+        dotnet build --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }}
 
-        dotnet publish --configuration Release "$target" -p:AssemblyVersion=${{ env.tag }} -p:PublishDir="$artifact_dir/"
+        proj_csproj="${csproj}"
+        projdir=$(dirname "$proj_csproj")
 
-        if ! command -v zip >/dev/null 2>&1; then
-          sudo apt-get update -y
-          sudo apt-get install -y zip
+        echo "PWD: $(pwd)"
+        echo "Top-level workspace listing:" && ls -la || true
+        echo "Recursive listing of project directory ($projdir):" && ls -laR "$projdir" || true
+        echo "Search for any latest.zip under workspace:" && find . -type f -name "latest.zip" -print || true
+
+        # Look for SDK-produced latest.zip across common layouts (bin/Release, bin/x64/Release, TFMs, etc.)
+        zipfile=$(find "$projdir/bin" -type f -path "*/Release*/*" -name "latest.zip" -print -quit 2>/dev/null || true)
+        if [ -z "${zipfile:-}" ]; then
+          zipfile=$(find "$projdir/bin" -type f -name "latest.zip" -print -quit 2>/dev/null || true)
         fi
-        (cd "$artifact_dir" && zip -r -q latest.zip .)
-        echo "Created latest.zip at: $artifact_dir/latest.zip"
-        echo "output_path=$artifact_dir/latest.zip" >> $GITHUB_ENV
+        if [ -z "${zipfile:-}" ]; then
+          echo "Expected SDK-produced latest.zip not found under $projdir/bin" >&2
+          echo "Available Release tree for debug:" >&2
+          find "$projdir/bin" -maxdepth 4 -type d -name "Release*" -print 2>/dev/null || true
+          echo "Any zips under bin:" >&2
+          find "$projdir/bin" -type f -name "*.zip" -print 2>/dev/null || true
+          exit 1
+        fi
+        echo "Detected SDK zip: $zipfile"
+        echo "output_path=$zipfile" >> $GITHUB_ENV
 
     - name: Publish Version
       uses: PunishXIV/dynamis-action@v1
