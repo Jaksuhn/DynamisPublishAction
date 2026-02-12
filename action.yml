@@ -109,8 +109,54 @@ runs:
           echo "Using provided csproj: ${{ inputs.project_csproj }}"
           echo "csproj=${{ inputs.project_csproj }}" >> $GITHUB_ENV
         else
-          # Use array expansion so excluded submodule paths are honored
-          csproj=$(find . "${EXCLUDE_FIND_ARGS[@]}" -name "*.csproj" -print -quit || true)
+          # First, try to detect InternalName from JSON to guide csproj selection
+          INTERNAL_NAME=""
+          SUBMODULE_PATHS=()
+          if [ -f .gitmodules ]; then
+            while IFS= read -r path; do
+              SUBMODULE_PATHS+=( "$path" )
+            done < <(git config -f .gitmodules --get-regexp path | awk '{print $2}')
+          fi
+
+          # Look for InternalName in JSON files (excluding submodules)
+          EXCLUDE_ARGS=()
+          for p in "${SUBMODULE_PATHS[@]}"; do
+            EXCLUDE_ARGS+=( -path "./$p" -prune -o )
+          done
+
+          if [ ${#EXCLUDE_ARGS[@]} -gt 0 ]; then
+            files=$(eval find . ${EXCLUDE_ARGS[@]} -name "*.json" -print || true)
+          else
+            files=$(find . -name "*.json" -print || true)
+          fi
+
+          for f in $files; do
+            INTERNAL_NAME=$(jq -r '.. | objects | select(has("InternalName")) | .InternalName | strings | select(length > 0)' "$f" 2>/dev/null | head -n1 || true)
+            if [ -n "$INTERNAL_NAME" ]; then
+              echo "Found InternalName in JSON: $INTERNAL_NAME"
+              break
+            fi
+          done
+
+          # Now find csproj: prefer one matching InternalName, fallback to first found
+          if [ -n "$INTERNAL_NAME" ]; then
+            echo "Searching for csproj matching InternalName: $INTERNAL_NAME"
+            # Try to find a csproj with matching name (case-insensitive)
+            csproj=$(find . "${EXCLUDE_FIND_ARGS[@]}" -iname "${INTERNAL_NAME}.csproj" -print -quit || true)
+          fi
+
+          # Fallback: find any .csproj (excluding submodules, prefer non-generator/utility projects)
+          if [ -z "$csproj" ]; then
+            echo "No matching csproj found, searching for any plugin csproj..."
+            # Prioritize csproj files that look like main plugins (exclude generators, utils, etc.)
+            csproj=$(find . "${EXCLUDE_FIND_ARGS[@]}" -name "*.csproj" ! -iname "*generator*" ! -iname "*util*" ! -iname "*helper*" -print -quit || true)
+          fi
+
+          # Last resort: any csproj
+          if [ -z "$csproj" ]; then
+            csproj=$(find . "${EXCLUDE_FIND_ARGS[@]}" -name "*.csproj" -print -quit || true)
+          fi
+
           if [ -z "$csproj" ]; then
             echo "No .csproj found and no project_csproj input provided" >&2
             exit 1
