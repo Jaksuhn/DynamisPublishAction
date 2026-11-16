@@ -14,30 +14,34 @@ die() {
     exit 1
 }
 
-if [ -z "$PROJECT_FILE" ]; then
-    # ls-files lists submodules as if they were regular files so we can safely ignore them
-    for candidate in $(git ls-files | grep '.csproj$'); do
-        if [ -n "$PROJECT_FILE" ]; then
-            die "Configuration error: multiple csproj files found. Please specify project_file."
-        fi
-        PROJECT_FILE="$candidate"
-    done
-
-    if [ -z "$PROJECT_FILE" ]; then
-        die "Configuration error: project_file not specified, and no csproj files found."
-    fi
+if [ -z "$PLUGIN_ID" ]; then
+    die "Plugin ID is required."
 fi
 
-say "project_file=$PROJECT_FILE"
+if [ -z "$INTERNAL_NAME" ]; then
+    INTERNAL_NAME="$(curl -f https://puni.sh/api/plugins/$PLUGIN_ID/internal-name)"
+fi
 
 if [ -z "$INTERNAL_NAME" ]; then
-    INTERNAL_NAME="$(dotnet msbuild -getProperty:MSBuildProjectName "$PROJECT_FILE")"
+    die "Internal error: unable to fetch internal name from Dynamis for plugin $PLUGIN_ID"
 fi
 
 say "internal_name=$INTERNAL_NAME"
 
-remote_release=$(curl -f "https://puni.sh/api/plugins/$PLUGIN_ID/$INTERNAL_NAME/versions/latest" || echo "0.0.0.0")
-remote_testing=$(curl -f "https://puni.sh/api/plugins/$PLUGIN_ID/$INTERNAL_NAME/versions/testing" || echo "0.0.0.0")
+if [ -z "$PROJECT_FILE" ]; then
+    PROJECT_FILE="$(find . -type f -name "$INTERNAL_NAME".csproj)"
+fi
+
+if [ -z "$PROJECT_FILE" ]; then
+    die "Unable to find project file '$INTERNAL_NAME.csproj'."
+fi
+
+say "project_file=$PROJECT_FILE"
+
+remote_versions=$(curl -f "https://puni.sh/api/plugins/$PLUGIN_ID/versions")
+
+remote_release="$(jq .latest <<< $remote_versions)"
+remote_testing="$(jq .testing <<< $remote_versions)"
 
 if version_gte "$remote_testing" "$remote_release"; then
     remote_actual="$remote_testing"

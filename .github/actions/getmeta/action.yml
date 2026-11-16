@@ -13,6 +13,8 @@ inputs:
     required: true
   dalamud_version:
     required: true
+  dalamud_track:
+    required: true
   version:
     required: true
   version_policy:
@@ -24,6 +26,8 @@ outputs:
     value: ${{ steps.dalamud_version.outputs.dotnet_version }}
   dalamud_version:
     value: ${{ steps.dalamud_version.outputs.dalamud_version }}
+  dalamud_url:
+    value: ${{ steps.dalamud_version.outputs.dalamud_url }}
   project_file:
     value: ${{ steps.plugin_version.outputs.project_file }}
   local_version:
@@ -41,13 +45,14 @@ runs:
       run: bash ${{ github.action_path }}/dalamud.sh
       shell: bash
       env:
+        DALAMUD_TRACK: ${{ inputs.dalamud_track }}
         DALAMUD_VERSION: ${{ inputs.dalamud_version }}
         DOTNET_VERSION: ${{ inputs.dotnet_version }}
 
     - uses: actions/setup-dotnet@v3
       with:
         dotnet-version: ${{ steps.dalamud_version.outputs.dotnet_version }}
-      if: ${{ !inputs.internal_name || (!inputs.version && inputs.version_policy == 'assembly') }}
+      if: ${{ !inputs.version && inputs.version_policy == 'assembly' }}
 
     - id: plugin_version
       run: bash ${{ github.action_path }}/plugin.sh
