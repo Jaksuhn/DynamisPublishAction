@@ -1,0 +1,136 @@
+on:
+  workflow_call:
+    inputs:
+      plugin_id:
+        type: number
+        required: true
+      version:
+        type: string
+        required: false
+      version_policy:
+        type: string
+        required: false
+        default: assembly
+      internal_name:
+        type: string
+        required: false
+      project_file:
+        type: string
+        required: false
+      dotnet_version:
+        type: string
+        required: false
+      dalamud_version:
+        type: string
+        required: false
+      testing:
+        type: boolean
+        required: false
+      build_command:
+        type: string
+        required: false
+        default: build -c Release
+      dalamud_track:
+        description: "`prefer-release` (newest track, release on tie), `release`, or an explicit track name"
+        type: string
+        required: false
+        default: prefer-release
+    secrets:
+      publisher_key:
+        required: true
+    outputs:
+      completed:
+        description: "`'true'` if a new version was built and published."
+        value: ${{ jobs.check_version.outputs.should_build }}
+      version:
+        value: ${{ jobs.check_version.outputs.local_version }}
+      release_type:
+        description: "`testing` or `latest`"
+        value: ${{ jobs.check_version.outputs.release_type }}
+
+jobs:
+  check_version:
+    runs-on: ubuntu-latest
+    outputs:
+      internal_name: ${{ steps.check_version.outputs.internal_name }}
+      dotnet_version: ${{ steps.check_version.outputs.dotnet_version }}
+      dalamud_version: ${{ steps.check_version.outputs.dalamud_version }}
+      dalamud_url: ${{ steps.check_version.outputs.dalamud_url }}
+      project_file: ${{ steps.check_version.outputs.project_file }}
+      local_version: ${{ steps.check_version.outputs.local_version }}
+      remote_version: ${{ steps.check_version.outputs.remote_version }}
+      release_type: ${{ steps.check_version.outputs.release_type }}
+      should_build: ${{ steps.check_version.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - id: check_version
+        uses: $/.github/actions/getmeta
+        with:
+          plugin_id: ${{ inputs.plugin_id }}
+          project_file: ${{ inputs.project_file }}
+          internal_name: ${{ inputs.internal_name }}
+          testing: ${{ inputs.testing && 'true' || 'false' }}
+          dotnet_version: ${{ inputs.dotnet_version }}
+          dalamud_version: ${{ inputs.dalamud_version }}
+          dalamud_track: ${{ inputs.dalamud_track }}
+          version: ${{ inputs.version }}
+          version_policy: ${{ inputs.version_policy }}
+
+  build:
+    runs-on: ubuntu-latest
+    needs: check_version
+    env:
+      DALAMUD_HOME: /tmp/dalamud
+    if: needs.check_version.outputs.should_build == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ needs.check_version.outputs.dotnet_version }}
+          
+      - name: Download Dalamud Latest
+        run: |
+          wget "${{ needs.check_version.outputs.dalamud_url }}" -O ${{ env.DALAMUD_HOME }}.zip
+          unzip ${{ env.DALAMUD_HOME }}.zip -d ${{ env.DALAMUD_HOME }}
+
+      - name: Compile
+        run: |
+          dotnet restore
+          dotnet ${{ inputs.build_command }} -p:AssemblyVersion=${{ needs.check_version.outputs.local_version }} ${{ needs.check_version.outputs.project_file }} -o /tmp/plugin-build
+          cp $(find /tmp/plugin-build -name latest.zip) /tmp/latest.zip
+          unzip -l /tmp/latest.zip
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest_zip
+          path: /tmp/latest.zip
+
+  publish:
+    runs-on: ubuntu-latest
+    needs:
+      - check_version
+      - build
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: latest_zip
+
+      - name: Publish new release
+        uses: PunishXIV/dynamis-action@v1
+        with:
+          plugin_id: ${{ inputs.plugin_id }}
+          internal_name: ${{ needs.check_version.outputs.internal_name }}
+          version_number: ${{ needs.check_version.outputs.local_version }}
+          path: latest.zip
+          type: ${{ needs.check_version.outputs.release_type }}
+          dalamud_version: ${{ needs.check_version.outputs.dalamud_version }}
+        env:
+          PUBLISHER_KEY: ${{ secrets.publisher_key }}
