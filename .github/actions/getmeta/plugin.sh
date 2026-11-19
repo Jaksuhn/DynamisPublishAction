@@ -40,8 +40,8 @@ say "project_file=$PROJECT_FILE"
 
 remote_versions=$(curl -f "https://puni.sh/api/plugins/$PLUGIN_ID/versions")
 
-remote_release="$(jq .latest <<< $remote_versions)"
-remote_testing="$(jq .testing <<< $remote_versions)"
+remote_release="$(jq -r '.latest // "0.0.0.0"' <<< $remote_versions)"
+remote_testing="$(jq -r '.testing // "0.0.0.0"' <<< $remote_versions)"
 
 if version_gte "$remote_testing" "$remote_release"; then
     remote_actual="$remote_testing"
